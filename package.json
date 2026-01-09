@@ -10,6 +10,7 @@
         "mcp:http": "npm run start --prefix mcp -- --http",
         "site:dev": "npm run dev --prefix site",
         "site:build": "npm run build --prefix site",
-        "lint": "make lint"
+        "lint": "make lint",
+        "postinstall": "cd mcp && npm install && cd ../site && npm install"
     }
 }
