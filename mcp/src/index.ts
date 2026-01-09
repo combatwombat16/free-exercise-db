@@ -96,6 +96,7 @@ async function main() {
 
         const transport = new StreamableHTTPServerTransport({
             sessionIdGenerator: () => randomUUID(),
+            enableJsonResponse: true,
         });
 
         await server.connect(transport);
