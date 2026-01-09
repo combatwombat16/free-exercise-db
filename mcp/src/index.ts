@@ -89,7 +89,7 @@ async function main() {
         const hostArg = process.argv.find((arg) => arg.startsWith("--host="));
 
         const port = portArg ? parseInt(portArg.split("=")[1], 10) : parseInt(process.env.PORT || "3000", 10);
-        const host = hostArg ? hostArg.split("=")[1] : "localhost";
+        const host = hostArg ? hostArg.split("=")[1] : (process.env.HOST || "localhost");
 
         const app = express();
         app.use(express.json());

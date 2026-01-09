@@ -54,14 +54,20 @@ npm start
 
 ### HTTP (Streamable HTTP) Transport
 
-Exposes the server over HTTP (port 3000 by default).
+Exposes the server over HTTP.
+Default: `localhost` on port `3000`.
+
+Configuration via arguments:
 
 ```bash
-# Default: http://localhost:3000/mcp
-npm run mcp:http
-
 # Custom host and port
 npm run mcp:http -- --host=0.0.0.0 --port=8080
+```
+
+Configuration via environment variables:
+
+```bash
+HOST=0.0.0.0 PORT=8080 npm run mcp:http
 ```
 
 ## Integration Example
