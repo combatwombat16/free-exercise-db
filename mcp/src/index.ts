@@ -94,46 +94,14 @@ async function main() {
         const app = express();
         app.use(express.json());
 
-        const transports: Record<string, StreamableHTTPServerTransport> = {};
+        const transport = new StreamableHTTPServerTransport({
+            sessionIdGenerator: () => randomUUID(),
+        });
+
+        await server.connect(transport);
 
         const mcpHandler = async (req: express.Request, res: express.Response) => {
-            const sessionId = req.headers["mcp-session-id"] as string;
-
             try {
-                let transport: StreamableHTTPServerTransport;
-
-                if (sessionId && transports[sessionId]) {
-                    transport = transports[sessionId];
-                } else if (!sessionId && req.method === "POST" && req.body?.method === "initialize") {
-                    console.error("New Streamable HTTP connection");
-                    transport = new StreamableHTTPServerTransport({
-                        sessionIdGenerator: () => randomUUID(),
-                        onsessioninitialized: (sid) => {
-                            console.error(`Session initialized: ${sid}`);
-                            transports[sid] = transport;
-                        },
-                    });
-
-                    transport.onclose = () => {
-                        const sid = transport.sessionId;
-                        if (sid && transports[sid]) {
-                            console.error(`Session closed: ${sid}`);
-                            delete transports[sid];
-                        }
-                    };
-
-                    await server.connect(transport);
-                    await transport.handleRequest(req, res, req.body);
-                    return;
-                } else {
-                    res.status(400).json({
-                        jsonrpc: "2.0",
-                        error: { code: -32000, message: "Invalid session or missing initialization" },
-                        id: null,
-                    });
-                    return;
-                }
-
                 await transport.handleRequest(req, res, req.body);
             } catch (error) {
                 console.error("MCP error:", error);
@@ -151,9 +119,12 @@ async function main() {
         app.get("/mcp", mcpHandler);
         app.delete("/mcp", mcpHandler);
 
-        app.listen(port, host, () => {
+        const serverInstance = app.listen(port, host, () => {
             console.error(`Free Exercise DB MCP server running on Streamable HTTP at http://${host}:${port}/mcp`);
         });
+
+        serverInstance.keepAliveTimeout = 61 * 1000;
+        serverInstance.headersTimeout = 65 * 1000;
     } else {
         const transport = new StdioServerTransport();
         await server.connect(transport);
