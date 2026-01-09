@@ -1,14 +1,8 @@
 #!/usr/bin/env node
-import { Server } from "@modelcontextprotocol/sdk/server/index.js";
+import { McpServer, ResourceTemplate } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import express from "express";
-import {
-    CallToolRequestSchema,
-    ListResourcesRequestSchema,
-    ListToolsRequestSchema,
-    ReadResourceRequestSchema,
-} from "@modelcontextprotocol/sdk/types.js";
 import { z } from "zod";
 import fs from "node:fs/promises";
 import path from "node:path";
@@ -45,41 +39,23 @@ async function loadData() {
     }
 }
 
-const server = new Server(
-    {
-        name: "free-exercise-db-mcp",
-        version: "1.0.0",
-    },
-    {
-        capabilities: {
-            resources: {},
-            tools: {},
-        },
-    }
-);
-
-/**
- * Resources
- */
-server.setRequestHandler(ListResourcesRequestSchema, async () => {
-    return {
-        resources: [
-            {
-                uri: "exercises://list",
-                name: "List of all exercises",
-                mimeType: "application/json",
-                description: "A complete list of exercise IDs and names",
-            },
-        ],
-    };
+// Create an MCP server instance using the high-level API
+const server = new McpServer({
+    name: "free-exercise-db-mcp",
+    version: "1.0.0",
 });
 
-server.setRequestHandler(ReadResourceRequestSchema, async (request) => {
-    if (request.params.uri === "exercises://list") {
-        return {
+async function main() {
+    await loadData();
+
+    // Register Resources
+    server.resource(
+        "list-exercises",
+        "exercises://list",
+        async (uri) => ({
             contents: [
                 {
-                    uri: request.params.uri,
+                    uri: uri.href,
                     mimeType: "application/json",
                     text: JSON.stringify(
                         exercises.map((e) => ({ id: e.id, name: e.name })),
@@ -88,109 +64,46 @@ server.setRequestHandler(ReadResourceRequestSchema, async (request) => {
                     ),
                 },
             ],
-        };
-    }
+        })
+    );
 
-    const exerciseMatch = request.params.uri.match(/^exercise:\/\/([^/]+)$/);
-    if (exerciseMatch) {
-        const id = exerciseMatch[1];
-        const exercise = exercises.find((e) => e.id === id);
-        if (exercise) {
+    server.resource(
+        "get-exercise",
+        new ResourceTemplate("exercise://{id}", { list: undefined }),
+        async (uri, { id }) => {
+            const exercise = exercises.find((e) => e.id === id);
+            if (!exercise) {
+                throw new Error(`Exercise with ID ${id} not found`);
+            }
             return {
                 contents: [
                     {
-                        uri: request.params.uri,
+                        uri: uri.href,
                         mimeType: "application/json",
                         text: JSON.stringify(exercise, null, 2),
                     },
                 ],
             };
         }
-    }
+    );
 
-    throw new Error("Resource not found");
-});
-
-/**
- * Tools
- */
-server.setRequestHandler(ListToolsRequestSchema, async () => {
-    return {
-        tools: [
-            {
-                name: "list_exercises",
-                description: "List exercises with optional filters",
-                inputSchema: {
-                    type: "object",
-                    properties: {
-                        category: { type: "string" },
-                        equipment: { type: "string" },
-                        level: { type: "string", enum: ["beginner", "intermediate", "expert"] },
-                        force: { type: "string", enum: ["pull", "push", "static"] },
-                        mechanic: { type: "string", enum: ["isolation", "compound"] },
-                    },
-                },
-            },
-            {
-                name: "get_exercise",
-                description: "Get full details for a specific exercise by ID",
-                inputSchema: {
-                    type: "object",
-                    properties: {
-                        id: { type: "string" },
-                    },
-                    required: ["id"],
-                },
-            },
-            {
-                name: "search_exercises",
-                description: "Search for exercises by name or instructions",
-                inputSchema: {
-                    type: "object",
-                    properties: {
-                        query: { type: "string" },
-                    },
-                    required: ["query"],
-                },
-            },
-            {
-                name: "search_by_muscles",
-                description: "Search for exercises by targeted muscles",
-                inputSchema: {
-                    type: "object",
-                    properties: {
-                        primaryMuscles: { type: "array", items: { type: "string" } },
-                        secondaryMuscles: { type: "array", items: { type: "string" } },
-                    },
-                },
-            },
-        ],
-    };
-});
-
-server.setRequestHandler(CallToolRequestSchema, async (request) => {
-    const { name, arguments: args } = request.params;
-
-    switch (name) {
-        case "list_exercises": {
-            const filters = args as any;
+    // Register Tools
+    server.tool(
+        "list_exercises",
+        {
+            category: z.string().optional(),
+            equipment: z.string().optional(),
+            level: z.enum(["beginner", "intermediate", "expert"]).optional(),
+            force: z.enum(["pull", "push", "static"]).optional(),
+            mechanic: z.enum(["isolation", "compound"]).optional(),
+        },
+        async (args) => {
             let filtered = exercises;
-
-            if (filters.category) {
-                filtered = filtered.filter((e) => e.category === filters.category);
-            }
-            if (filters.equipment) {
-                filtered = filtered.filter((e) => e.equipment === filters.equipment);
-            }
-            if (filters.level) {
-                filtered = filtered.filter((e) => e.level === filters.level);
-            }
-            if (filters.force) {
-                filtered = filtered.filter((e) => e.force === filters.force);
-            }
-            if (filters.mechanic) {
-                filtered = filtered.filter((e) => e.mechanic === filters.mechanic);
-            }
+            if (args.category) filtered = filtered.filter((e) => e.category === args.category);
+            if (args.equipment) filtered = filtered.filter((e) => e.equipment === args.equipment);
+            if (args.level) filtered = filtered.filter((e) => e.level === args.level);
+            if (args.force) filtered = filtered.filter((e) => e.force === args.force);
+            if (args.mechanic) filtered = filtered.filter((e) => e.mechanic === args.mechanic);
 
             return {
                 content: [
@@ -205,33 +118,39 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
                 ],
             };
         }
+    );
 
-        case "get_exercise": {
-            const { id } = z.object({ id: z.string() }).parse(args);
+    server.tool(
+        "get_exercise",
+        {
+            id: z.string(),
+        },
+        async ({ id }) => {
             const exercise = exercises.find((e) => e.id === id);
-
             if (!exercise) {
                 return {
                     content: [{ type: "text", text: `Exercise with ID ${id} not found.` }],
                     isError: true,
                 };
             }
-
             return {
                 content: [{ type: "text", text: JSON.stringify(exercise, null, 2) }],
             };
         }
+    );
 
-        case "search_exercises": {
-            const { query } = z.object({ query: z.string() }).parse(args);
+    server.tool(
+        "search_exercises",
+        {
+            query: z.string(),
+        },
+        async ({ query }) => {
             const lowerQuery = query.toLowerCase();
-
             const results = exercises.filter(
                 (e) =>
                     e.name.toLowerCase().includes(lowerQuery) ||
                     e.instructions.some((inst) => inst.toLowerCase().includes(lowerQuery))
             );
-
             return {
                 content: [
                     {
@@ -245,15 +164,15 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
                 ],
             };
         }
+    );
 
-        case "search_by_muscles": {
-            const { primaryMuscles, secondaryMuscles } = z
-                .object({
-                    primaryMuscles: z.array(z.string()).optional(),
-                    secondaryMuscles: z.array(z.string()).optional(),
-                })
-                .parse(args);
-
+    server.tool(
+        "search_by_muscles",
+        {
+            primaryMuscles: z.array(z.string()).optional(),
+            secondaryMuscles: z.array(z.string()).optional(),
+        },
+        async ({ primaryMuscles, secondaryMuscles }) => {
             const results = exercises.filter((e) => {
                 const matchesPrimary = primaryMuscles
                     ? primaryMuscles.every((m) => e.primaryMuscles.includes(m))
@@ -263,7 +182,6 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
                     : true;
                 return matchesPrimary && matchesSecondary;
             });
-
             return {
                 content: [
                     {
@@ -277,21 +195,15 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
                 ],
             };
         }
+    );
 
-        default:
-            throw new Error(`Unknown tool: ${name}`);
-    }
-});
-
-async function main() {
-    await loadData();
-
+    // Transport Setup
     const isHttp = process.argv.includes("--http");
     const transportType = isHttp ? "http" : "stdio";
 
     if (transportType === "http") {
-        const portArg = process.argv.find(arg => arg.startsWith("--port="));
-        const hostArg = process.argv.find(arg => arg.startsWith("--host="));
+        const portArg = process.argv.find((arg) => arg.startsWith("--port="));
+        const hostArg = process.argv.find((arg) => arg.startsWith("--host="));
 
         const port = portArg ? parseInt(portArg.split("=")[1], 10) : parseInt(process.env.PORT || "3000", 10);
         const host = hostArg ? hostArg.split("=")[1] : "localhost";
