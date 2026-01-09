@@ -16,6 +16,10 @@ Expose the [Free Exercise Database](https://github.com/yuhonas/free-exercise-db)
 - `exercises://list`: JSON list of all available exercise IDs and names.
 - `exercise://{id}`: Detailed JSON for a specific exercise.
 
+### Endpoints
+
+- `/health`: Simple GET endpoint returning 200 OK (HTTP transport only).
+
 ## Getting Started
 
 ### Prerequisites

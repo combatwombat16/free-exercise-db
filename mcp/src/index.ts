@@ -143,6 +143,10 @@ async function main() {
             }
         };
 
+        app.get("/health", (req, res) => {
+            res.status(200).send("OK");
+        });
+
         app.post("/mcp", mcpHandler);
         app.get("/mcp", mcpHandler);
         app.delete("/mcp", mcpHandler);
