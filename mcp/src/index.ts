@@ -26,14 +26,11 @@ async function loadData() {
     }
 }
 
-// Create an MCP server instance using the high-level API
-const server = new McpServer({
-    name: "free-exercise-db-mcp",
-    version: "1.0.0",
-});
-
-async function main() {
-    await loadData();
+function createServer() {
+    const server = new McpServer({
+        name: "free-exercise-db-mcp",
+        version: "1.0.0",
+    });
 
     // Register Resources
     server.registerResource(
@@ -80,6 +77,12 @@ async function main() {
     // Register Tools
     registerTools(server, exercises);
 
+    return server;
+}
+
+async function main() {
+    await loadData();
+
     // Transport Setup
     const isHttp = process.argv.includes("--http");
     const transportType = isHttp ? "http" : "stdio";
@@ -92,16 +95,36 @@ async function main() {
         const host = hostArg ? hostArg.split("=")[1] : (process.env.HOST || "0.0.0.0");
 
         const app = express();
+        const sessions = new Map<string, { server: McpServer; transport: StreamableHTTPServerTransport }>();
+
         app.use(express.json());
 
-        const transport = new StreamableHTTPServerTransport({
-            sessionIdGenerator: () => randomUUID(),
-            enableJsonResponse: true,
-        });
-
-        await server.connect(transport);
-
         const mcpHandler = async (req: express.Request, res: express.Response) => {
+            const rawSessionId = req.query.sessionId as string | undefined;
+            let transport: StreamableHTTPServerTransport | undefined;
+
+            // Try to find existing session
+            if (rawSessionId && sessions.has(rawSessionId)) {
+                transport = sessions.get(rawSessionId)!.transport;
+            } else {
+                // Create new session
+                // If the client provided a session ID (that we don't have), we use it.
+                // Otherwise, we generate a new one.
+                const newSessionId = rawSessionId || randomUUID();
+
+                transport = new StreamableHTTPServerTransport({
+                    // If the request doesn't specify an ID, this generator is called.
+                    // We ensure it returns the ID we've chosen/expect.
+                    sessionIdGenerator: () => newSessionId,
+                    enableJsonResponse: true,
+                });
+
+                const server = createServer();
+                await server.connect(transport);
+
+                sessions.set(newSessionId, { server, transport });
+            }
+
             try {
                 await transport.handleRequest(req, res, req.body);
             } catch (error) {
@@ -118,7 +141,6 @@ async function main() {
 
         app.post("/mcp", mcpHandler);
         app.get("/mcp", mcpHandler);
-        app.delete("/mcp", mcpHandler);
 
         const serverInstance = app.listen(port, host, () => {
             console.error(`Free Exercise DB MCP server running on Streamable HTTP at http://${host}:${port}/mcp`);
@@ -127,6 +149,7 @@ async function main() {
         serverInstance.keepAliveTimeout = 61 * 1000;
         serverInstance.headersTimeout = 65 * 1000;
     } else {
+        const server = createServer();
         const transport = new StdioServerTransport();
         await server.connect(transport);
         console.error("Free Exercise DB MCP server running on stdio");
