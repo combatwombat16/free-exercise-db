@@ -3,7 +3,8 @@ import { McpServer, ResourceTemplate } from "@modelcontextprotocol/sdk/server/mc
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import express from "express";
-import fs from "node:fs/promises";
+import fsPromises from "node:fs/promises";
+import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { randomUUID } from "node:crypto";
@@ -17,7 +18,7 @@ let exercises: Exercise[] = [];
 
 async function loadData() {
     try {
-        const data = await fs.readFile(EXERCISES_DATA_PATH, "utf-8");
+        const data = await fsPromises.readFile(EXERCISES_DATA_PATH, "utf-8");
         exercises = JSON.parse(data);
         console.error(`Loaded ${exercises.length} exercises.`);
     } catch (error) {
@@ -97,20 +98,56 @@ async function main() {
         const app = express();
         const sessions = new Map<string, { server: McpServer; transport: StreamableHTTPServerTransport }>();
 
+        // Global logging
+        app.use((req, res, next) => {
+            console.error(`[Global Debug] ${req.method} ${req.url}`);
+            console.error(`[Global Debug] Headers: ${JSON.stringify(req.headers)}`);
+
+            // Hook res.end and res.write to capture response
+            const originalWrite = res.write;
+            const originalEnd = res.end;
+
+            const chunks: Buffer[] = [];
+
+            res.write = function (chunk: any, ...args: any[]) {
+                if (chunk) chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+                return originalWrite.apply(res, [chunk, ...args] as any);
+            };
+
+            res.end = function (chunk: any, ...args: any[]) {
+                if (chunk) chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+                const body = Buffer.concat(chunks).toString('utf8');
+                console.error(`[Global Debug] Response Status: ${res.statusCode}`);
+                console.error(`[Global Debug] Response Body: ${body}`);
+                return originalEnd.apply(res, [chunk, ...args] as any);
+            };
+
+            next();
+        });
+
         app.use(express.json());
 
         const mcpHandler = async (req: express.Request, res: express.Response) => {
-            const rawSessionId = req.query.sessionId as string | undefined;
+            console.error(`[Debug] Parsed Body: ${JSON.stringify(req.body)}`);
+
+            const querySessionId = req.query.sessionId as string | undefined;
+            const headerSessionId = req.headers['mcp-session-id'] as string | undefined;
+            const rawSessionId = querySessionId || headerSessionId;
+
+            console.error(`[Debug] Handling request. QueryID=${querySessionId}, HeaderID=${headerSessionId}`);
+
             let transport: StreamableHTTPServerTransport | undefined;
 
             // Try to find existing session
             if (rawSessionId && sessions.has(rawSessionId)) {
+                console.error(`[Debug] Found existing session: ${rawSessionId}`);
                 transport = sessions.get(rawSessionId)!.transport;
             } else {
                 // Create new session
                 // If the client provided a session ID (that we don't have), we use it.
                 // Otherwise, we generate a new one.
                 const newSessionId = rawSessionId || randomUUID();
+                console.error(`[Debug] Creating new session: ${newSessionId} (raw=${rawSessionId})`);
 
                 transport = new StreamableHTTPServerTransport({
                     // If the request doesn't specify an ID, this generator is called.
