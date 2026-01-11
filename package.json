@@ -7,7 +7,6 @@
         "start": "npm run build --prefix mcp && npm run start --prefix mcp",
         "mcp:build": "npm run build --prefix mcp",
         "mcp:start": "npm run start --prefix mcp",
-        "mcp:http": "npm run start --prefix mcp -- --http",
         "site:dev": "npm run dev --prefix site",
         "site:build": "npm run build --prefix site",
         "lint": "make lint",
